@@ -23,14 +23,13 @@
 
 namespace SimpleThings\EntityAudit\EventListener;
 
-use Doctrine\Common\EventSubscriber;
 use Doctrine\DBAL\Schema\Column;
-use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\ClassMetadataInfo;
-use Doctrine\ORM\Tools\Event\GenerateSchemaEventArgs;
-use Doctrine\ORM\Tools\Event\GenerateSchemaTableEventArgs;
 use Doctrine\ORM\Tools\ToolEvents;
 use SimpleThings\EntityAudit\AuditManager;
+use Doctrine\ORM\Tools\Event\GenerateSchemaTableEventArgs;
+use Doctrine\ORM\Tools\Event\GenerateSchemaEventArgs;
+use Doctrine\Common\EventSubscriber;
 
 class CreateSchemaListener implements EventSubscriber
 {
@@ -62,8 +61,18 @@ class CreateSchemaListener implements EventSubscriber
     {
         $cm = $eventArgs->getClassMetadata();
 
-        if (! $this->isAudited($cm)) {
-            return;
+        if (!$this->metadataFactory->isAudited($cm->name)) {
+            $audited = false;
+            if ($cm->isInheritanceTypeJoined() && $cm->rootEntityName == $cm->name) {
+                foreach ($cm->subClasses as $subClass) {
+                    if ($this->metadataFactory->isAudited($subClass)) {
+                        $audited = true;
+                    }
+                }
+            }
+            if (!$audited) {
+                return;
+            }
         }
 
         $schema = $eventArgs->getSchema();
@@ -72,7 +81,7 @@ class CreateSchemaListener implements EventSubscriber
             $this->config->getTablePrefix().$entityTable->getName().$this->config->getTableSuffix()
         );
 
-        foreach ($entityTable->getColumns() as $column) {
+        foreach ($entityTable->getColumns() AS $column) {
             /* @var Column $column */
             $revisionTable->addColumn($column->getName(), $column->getType()->getName(), array_merge(
                 $column->toArray(),
@@ -88,7 +97,29 @@ class CreateSchemaListener implements EventSubscriber
         $pkColumns = $entityTable->getPrimaryKey()->getColumns();
         $pkColumns[] = $this->config->getRevisionFieldName();
         $revisionTable->setPrimaryKey($pkColumns);
-        $revisionTable->addIndex(array($this->config->getRevisionFieldName()));
+        $revIndexName = $this->config->getRevisionFieldName().'_'.md5($revisionTable->getName()).'_idx';
+        $revisionTable->addIndex(array($this->config->getRevisionFieldName()),$revIndexName);
+
+        foreach ($cm->associationMappings as $property => $mapping) {
+            if ($mapping['type'] !== ClassMetadataInfo::MANY_TO_MANY) {
+                continue;
+            }
+
+            $joinTable = $mapping['joinTable'];
+            $tableName = $joinTable['name'];
+
+            $manyToManyRevisionTable = $schema->createTable(
+                $this->config->getTablePrefix() . $tableName . $this->config->getTableSuffix()
+            );
+
+            foreach ($mapping['joinTableColumns'] as $joinTableColumn) {
+                $manyToManyRevisionTable->addColumn($joinTableColumn, 'integer');
+            }
+
+            $manyToManyRevisionTable->addColumn($this->config->getRevisionFieldName(), $this->config->getRevisionIdFieldType());
+            $manyToManyRevisionTable->addColumn($this->config->getRevisionTypeFieldName(), 'string', array('length' => 4));
+            $manyToManyRevisionTable->addIndex(array($this->config->getRevisionFieldName()),$revIndexName);
+        }
     }
 
     public function postGenerateSchema(GenerateSchemaEventArgs $eventArgs)
@@ -101,27 +132,5 @@ class CreateSchemaListener implements EventSubscriber
         $revisionsTable->addColumn('timestamp', 'datetime');
         $revisionsTable->addColumn('username', 'string')->setNotnull(false);
         $revisionsTable->setPrimaryKey(array('id'));
-    }
-
-    /**
-     * @param ClassMetadata $cm
-     *
-     * @return bool
-     */
-    private function isAudited(ClassMetadata $cm)
-    {
-        if ($this->metadataFactory->isAudited($cm->name)) {
-            return true;
-        }
-
-        if ($cm->isInheritanceTypeJoined() && $cm->rootEntityName == $cm->name) {
-            foreach ($cm->subClasses as $subClass) {
-                if ($this->metadataFactory->isAudited($subClass)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }
