@@ -31,6 +31,7 @@ use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Events;
 use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\Persisters\Entity\BasicEntityPersister;
 use Doctrine\ORM\Persisters\Entity\EntityPersister;
 use SimpleThings\EntityAudit\AuditManager;
@@ -87,6 +88,8 @@ class LogRevisionsListener implements EventSubscriber
      * @var array
      */
     private $extraUpdates = array();
+
+    private $extraUpdatesCollection = array();
 
     public function __construct(AuditManager $auditManager)
     {
@@ -199,6 +202,23 @@ class LogRevisionsListener implements EventSubscriber
                 $this->em->getConnection()->executeQuery($sql, $params, $types);
             }
         }
+
+        foreach ($this->extraUpdatesCollection as $updateData) {
+            $sql = sprintf(
+                'INSERT INTO %s (%s, rev, revtype) VALUES (?, ?, ?, ?)',
+                $updateData['revision_table_name'],
+                implode(', ', $updateData['join_table_columns'])
+            );
+
+            foreach ($updateData['relation_ids'] as $relationId) {
+                $this->em->getConnection()->executeQuery($sql, [
+                    $updateData['owner_id'],
+                    $relationId,
+                    $this->getRevisionId(),
+                    'UPD'
+                ]);
+            }
+        }
     }
 
     public function postPersist(LifecycleEventArgs $eventArgs)
@@ -285,6 +305,34 @@ class LogRevisionsListener implements EventSubscriber
             }
 
             $this->extraUpdates[spl_object_hash($entity)] = $entity;
+        }
+
+        /** @var PersistentCollection $persistentCollection */
+        foreach ($this->uow->getScheduledCollectionUpdates() as $persistentCollection) {
+            if (! $this->metadataFactory->isAudited(get_class($persistentCollection->getOwner()))) {
+                continue;
+            }
+
+            if ($persistentCollection->getMapping()['type'] !== ClassMetadata::MANY_TO_MANY) {
+                continue;
+            }
+
+            $mapping = $persistentCollection->getMapping();
+
+            $revisionTableName = $this->config->getTablePrefix() . $mapping['joinTable']['name'] . $this->config->getTableSuffix();
+            $ownerId = $persistentCollection->getOwner()->getId();
+            $relationToIds = array_map(function($entity) {
+                return $entity->getId();
+            }, $persistentCollection->getValues());
+
+            $joinTableColumns = $mapping['joinTableColumns'];
+
+            $this->extraUpdatesCollection[] = [
+                'revision_table_name' => $revisionTableName,
+                'owner_id' => $ownerId,
+                'relation_ids' => $relationToIds,
+                'join_table_columns' => $joinTableColumns,
+            ];
         }
     }
 
