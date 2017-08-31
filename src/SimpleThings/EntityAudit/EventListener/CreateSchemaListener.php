@@ -99,6 +99,27 @@ class CreateSchemaListener implements EventSubscriber
         $revisionTable->setPrimaryKey($pkColumns);
         $revIndexName = $this->config->getRevisionFieldName().'_'.md5($revisionTable->getName()).'_idx';
         $revisionTable->addIndex(array($this->config->getRevisionFieldName()),$revIndexName);
+
+        foreach ($cm->associationMappings as $property => $mapping) {
+            if ($mapping['type'] !== ClassMetadataInfo::MANY_TO_MANY) {
+                continue;
+            }
+
+            $joinTable = $mapping['joinTable'];
+            $tableName = $joinTable['name'];
+
+            $manyToManyRevisionTable = $schema->createTable(
+                $this->config->getTablePrefix() . $tableName . $this->config->getTableSuffix()
+            );
+
+            foreach ($mapping['joinTableColumns'] as $joinTableColumn) {
+                $manyToManyRevisionTable->addColumn($joinTableColumn, 'integer');
+            }
+
+            $manyToManyRevisionTable->addColumn($this->config->getRevisionFieldName(), $this->config->getRevisionIdFieldType());
+            $manyToManyRevisionTable->addColumn($this->config->getRevisionTypeFieldName(), 'string', array('length' => 4));
+            $manyToManyRevisionTable->addIndex(array($this->config->getRevisionFieldName()),$revIndexName);
+        }
     }
 
     public function postGenerateSchema(GenerateSchemaEventArgs $eventArgs)

@@ -1,5 +1,6 @@
 <?php
 /*
+ *
  * (c) 2011 SimpleThings GmbH
  *
  * @package SimpleThings\EntityAudit
@@ -19,6 +20,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  */
 
 namespace SimpleThings\EntityAudit\EventListener;
@@ -31,6 +33,7 @@ use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Events;
 use Doctrine\ORM\Mapping\ClassMetadata;
+use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\Persisters\Entity\BasicEntityPersister;
 use Doctrine\ORM\Persisters\Entity\EntityPersister;
 use SimpleThings\EntityAudit\AuditManager;
@@ -87,6 +90,8 @@ class LogRevisionsListener implements EventSubscriber
      * @var array
      */
     private $extraUpdates = array();
+
+    private $extraUpdatesCollection = array();
 
     public function __construct(AuditManager $auditManager)
     {
@@ -174,7 +179,7 @@ class LogRevisionsListener implements EventSubscriber
 
                 $types[] = $this->config->getRevisionIdFieldType();
 
-                foreach ($meta->identifier AS $idField) {
+                foreach ($meta->identifier as $idField) {
                     if (isset($meta->fieldMappings[$idField])) {
                         $columnName = $meta->fieldMappings[$idField]['columnName'];
                         $types[] = $meta->fieldMappings[$idField]['type'];
@@ -197,6 +202,42 @@ class LogRevisionsListener implements EventSubscriber
                 }
 
                 $this->em->getConnection()->executeQuery($sql, $params, $types);
+            }
+        }
+
+        /** @var PersistentCollection $persistentCollection */
+        foreach ($uow->getScheduledCollectionUpdates() as $persistentCollection) {
+            if (!$this->metadataFactory->isAudited(get_class($persistentCollection->getOwner()))) {
+                continue;
+            }
+
+            if ($persistentCollection->getMapping()['type'] !== ClassMetadata::MANY_TO_MANY) {
+                continue;
+            }
+
+            $mapping = $persistentCollection->getMapping();
+
+            $revisionTableName = $this->config->getTablePrefix() . $mapping['joinTable']['name'] . $this->config->getTableSuffix();
+            $ownerId = $persistentCollection->getOwner()->getId();
+            $relationToIds = array_map(function ($entity) {
+                return $entity->getId();
+            }, $persistentCollection->getValues());
+            $joinTableColumns[] = $mapping['joinTable']['joinColumns'][0]['name'];
+            $joinTableColumns[] = $mapping['joinTable']['inverseJoinColumns'][0]['name'];
+
+            $sql = sprintf(
+                'INSERT INTO %s (%s, rev, revtype) VALUES (?, ?, ?, ?)',
+                $revisionTableName,
+                implode(', ', $joinTableColumns)
+            );
+
+            foreach ($relationToIds as $relationId) {
+                $this->em->getConnection()->executeQuery($sql, array(
+                    $ownerId,
+                    $relationId,
+                    $this->getRevisionId(),
+                    'UPD'
+                ));
             }
         }
     }
@@ -252,7 +293,7 @@ class LogRevisionsListener implements EventSubscriber
 
         $processedEntities = array();
 
-        foreach ($this->uow->getScheduledEntityDeletions() AS $entity) {
+        foreach ($this->uow->getScheduledEntityDeletions() as $entity) {
             //doctrine is fine deleting elements multiple times. We are not.
             $hash = $this->getHash($entity);
 
@@ -408,7 +449,7 @@ class LogRevisionsListener implements EventSubscriber
 
         $fields = array();
 
-        foreach ($class->associationMappings AS $field => $assoc) {
+        foreach ($class->associationMappings as $field => $assoc) {
             if ($class->isInheritanceTypeJoined() && $class->isInheritedAssociation($field)) {
                 continue;
             }
@@ -437,7 +478,7 @@ class LogRevisionsListener implements EventSubscriber
             }
         }
 
-        foreach ($class->fieldNames AS $field) {
+        foreach ($class->fieldNames as $field) {
             if (array_key_exists($field, $fields)) {
                 continue;
             }
@@ -533,7 +574,7 @@ class LogRevisionsListener implements EventSubscriber
 
             $newVal = $change[1];
 
-            if ( ! isset($classMetadata->associationMappings[$field])) {
+            if (! isset($classMetadata->associationMappings[$field])) {
                 $columnName = $classMetadata->columnNames[$field];
                 $result[$persister->getOwningTable($field)][$columnName] = $newVal;
 
@@ -543,7 +584,7 @@ class LogRevisionsListener implements EventSubscriber
             $assoc = $classMetadata->associationMappings[$field];
 
             // Only owning side of x-1 associations can have a FK column.
-            if ( ! $assoc['isOwningSide'] || ! ($assoc['type'] & ClassMetadata::TO_ONE)) {
+            if (! $assoc['isOwningSide'] || ! ($assoc['type'] & ClassMetadata::TO_ONE)) {
                 continue;
             }
 
