@@ -1,22 +1,27 @@
 <?php
-
 /*
-	Paul's Simple Diff Algorithm v 0.1
-	(C) Paul Butler 2007 <http://www.paulbutler.org/>
-	May be used and distributed under the zlib/libpng license.
-
-	This code is intended for learning purposes; it was written with short
-	code taking priority over performance. It could be used in a practical
-	application, but there are a few ways it could be optimized.
-
-	Given two arrays, the function diff will return an array of the changes.
-	I won't describe the format of the array, but it will be obvious
-	if you use print_r() on the result of a diff on some test data.
-
-	htmlDiff is a wrapper for the diff command, it takes two strings and
-	returns the differences in HTML. The tags used are <ins> and <del>,
-	which can easily be styled with CSS.
-*/
+ *
+ * (c) 2011 SimpleThings GmbH
+ *
+ * @package SimpleThings\EntityAudit
+ * @author Benjamin Eberlei <eberlei@simplethings.de>
+ * @link http://www.simplethings.de
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
+ */
 
 namespace SimpleThings\EntityAudit\Utils;
 
@@ -42,11 +47,14 @@ class SimpleDiff
                 }
             }
         }
-        if ($maxlen == 0) return array(array('d' => $old, 'i' => $new));
+        if ($maxlen == 0) {
+            return array(array('d' => $old, 'i' => $new));
+        }
         return array_merge(
             $this->diff(array_slice($old, 0, $omax), array_slice($new, 0, $nmax)),
             array_slice($new, $nmax, $maxlen),
-            $this->diff(array_slice($old, $omax + $maxlen), array_slice($new, $nmax + $maxlen)));
+            $this->diff(array_slice($old, $omax + $maxlen), array_slice($new, $nmax + $maxlen))
+        );
     }
 
     public function htmlDiff($old, $new)
@@ -54,10 +62,12 @@ class SimpleDiff
         $ret = '';
         $diff = $this->diff(explode(' ', $old), explode(' ', $new));
         foreach ($diff as $k) {
-            if (is_array($k))
+            if (is_array($k)) {
                 $ret .= (!empty($k['d']) ? "<del>" . implode(' ', $k['d']) . "</del> " : '') .
                         (!empty($k['i']) ? "<ins>" . implode(' ', $k['i']) . "</ins> " : '');
-            else $ret .= $k . ' ';
+            } else {
+                $ret .= $k . ' ';
+            }
         }
         return $ret;
     }

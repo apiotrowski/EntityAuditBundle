@@ -1,5 +1,6 @@
 <?php
 /*
+ *
  * (c) 2011 SimpleThings GmbH
  *
  * @package SimpleThings\EntityAudit
@@ -19,6 +20,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  */
 
 namespace SimpleThings\EntityAudit\Tests;
@@ -109,7 +111,9 @@ class RelationTest extends BaseTest
 
         $this->em->flush();
 
-        unset($owner); unset($owned1); unset($owned2);
+        unset($owner);
+        unset($owned1);
+        unset($owned2);
         $this->em->clear();
 
         $owner = $this->em->getReference("SimpleThings\\EntityAudit\\Tests\\Fixtures\\Relation\\OwnerEntity", 1);
@@ -290,8 +294,7 @@ class RelationTest extends BaseTest
         $this->em->persist($owner);
         $this->em->persist($owned31);
         $this->em->persist($owned32);
-
-        $this->em->flush(); //#1
+        $this->em->flush();
 
         //checking that getOwned3() returns an empty collection
         $audited = $auditReader->find(get_class($owner), $owner->getId(), 1);

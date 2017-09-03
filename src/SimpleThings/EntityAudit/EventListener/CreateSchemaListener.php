@@ -1,5 +1,6 @@
 <?php
 /*
+ *
  * (c) 2011 SimpleThings GmbH
  *
  * @package SimpleThings\EntityAudit
@@ -19,6 +20,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  */
 
 namespace SimpleThings\EntityAudit\EventListener;
@@ -81,7 +83,7 @@ class CreateSchemaListener implements EventSubscriber
             $this->config->getTablePrefix().$entityTable->getName().$this->config->getTableSuffix()
         );
 
-        foreach ($entityTable->getColumns() AS $column) {
+        foreach ($entityTable->getColumns() as $column) {
             /* @var Column $column */
             $revisionTable->addColumn($column->getName(), $column->getType()->getName(), array_merge(
                 $column->toArray(),
@@ -98,7 +100,7 @@ class CreateSchemaListener implements EventSubscriber
         $pkColumns[] = $this->config->getRevisionFieldName();
         $revisionTable->setPrimaryKey($pkColumns);
         $revIndexName = $this->config->getRevisionFieldName().'_'.md5($revisionTable->getName()).'_idx';
-        $revisionTable->addIndex(array($this->config->getRevisionFieldName()),$revIndexName);
+        $revisionTable->addIndex(array($this->config->getRevisionFieldName()), $revIndexName);
 
         foreach ($cm->associationMappings as $property => $mapping) {
             if ($mapping['type'] !== ClassMetadataInfo::MANY_TO_MANY) {
@@ -112,13 +114,13 @@ class CreateSchemaListener implements EventSubscriber
                 $this->config->getTablePrefix() . $tableName . $this->config->getTableSuffix()
             );
 
-            foreach ($mapping['joinTableColumns'] as $joinTableColumn) {
-                $manyToManyRevisionTable->addColumn($joinTableColumn, 'integer');
-            }
+            $manyToManyRevisionTable->addColumn($joinTable['joinColumns'][0]['name'], 'integer');
+            $manyToManyRevisionTable->addColumn($joinTable['inverseJoinColumns'][0]['name'], 'integer');
 
             $manyToManyRevisionTable->addColumn($this->config->getRevisionFieldName(), $this->config->getRevisionIdFieldType());
             $manyToManyRevisionTable->addColumn($this->config->getRevisionTypeFieldName(), 'string', array('length' => 4));
-            $manyToManyRevisionTable->addIndex(array($this->config->getRevisionFieldName()),$revIndexName);
+            $revIndexName = $this->config->getRevisionFieldName().'_'.md5($tableName).'_idx';
+            $manyToManyRevisionTable->addIndex(array($this->config->getRevisionFieldName()), $revIndexName);
         }
     }
 

@@ -1,5 +1,6 @@
 <?php
 /*
+ *
  * (c) 2011 SimpleThings GmbH
  *
  * @package SimpleThings\EntityAudit
@@ -19,6 +20,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  */
 
 namespace SimpleThings\EntityAudit\Tests;
@@ -140,14 +142,14 @@ abstract class BaseTest extends \PHPUnit_Framework_TestCase
     protected function _getConnection()
     {
         if (!isset(self::$conn)) {
-            if(isset(
+            if (isset(
                 $GLOBALS['db_type'],
                 $GLOBALS['db_username'],
                 $GLOBALS['db_password'],
                 $GLOBALS['db_host'],
                 $GLOBALS['db_name'],
                 $GLOBALS['db_port']
-            )){
+            )) {
                 $params = array(
                     'driver' => $GLOBALS['db_type'],
                     'user' => $GLOBALS['db_username'],
@@ -176,7 +178,6 @@ abstract class BaseTest extends \PHPUnit_Framework_TestCase
                 }
 
                 $conn->close();
-
             } else {
                 $params = array(
                     'driver' => 'pdo_sqlite',

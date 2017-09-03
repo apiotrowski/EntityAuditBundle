@@ -1,5 +1,6 @@
 <?php
 /*
+ *
  * (c) 2011 SimpleThings GmbH
  *
  * @package SimpleThings\EntityAudit
@@ -19,6 +20,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  */
 
 namespace SimpleThings\EntityAudit;
@@ -231,10 +233,12 @@ class AuditReader
 
         $whereSQL  = "e." . $this->config->getRevisionFieldName() ." <= ?";
 
-        foreach ($class->identifier AS $idField) {
+        foreach ($class->identifier as $idField) {
             if (is_array($id) && count($id) > 0) {
-                $columnName = $idField;
-            } else if (isset($class->fieldMappings[$idField])) {
+//                $columnName = $idField;
+                $idKeys = array_keys($id);
+                $columnName = $idKeys[0];
+            } elseif (isset($class->fieldMappings[$idField])) {
                 $columnName = $class->fieldMappings[$idField]['columnName'];
             } elseif (isset($class->associationMappings[$idField])) {
                 $columnName = $class->associationMappings[$idField]['joinColumns'][0];
@@ -269,7 +273,7 @@ class AuditReader
             $columnMap[$field] = $this->platform->getSQLResultCasing($columnName);
         }
 
-        foreach ($class->associationMappings AS $assoc) {
+        foreach ($class->associationMappings as $assoc) {
             if (($assoc['type'] & ClassMetadata::TO_ONE) == 0 || ! $assoc['isOwningSide']) {
                 continue;
             }
@@ -356,7 +360,7 @@ class AuditReader
         //lookup revisioned entity cache
         $keyParts = array();
 
-        foreach($class->getIdentifierFieldNames() as $name) {
+        foreach ($class->getIdentifierFieldNames() as $name) {
             $keyParts[] = $data[$name];
         }
 
@@ -530,12 +534,14 @@ class AuditReader
     public function findRevisionHistory($limit = 20, $offset = 0)
     {
         $query = $this->platform->modifyLimitQuery(
-            "SELECT * FROM " . $this->config->getRevisionTableName() . " ORDER BY id DESC", $limit, $offset
+            "SELECT * FROM " . $this->config->getRevisionTableName() . " ORDER BY id DESC",
+            $limit,
+            $offset
         );
         $revisionsData = $this->em->getConnection()->fetchAll($query);
 
         $revisions = array();
-        foreach ($revisionsData AS $row) {
+        foreach ($revisionsData as $row) {
             $revisions[] = new Revision(
                 $row['id'],
                 \DateTime::createFromFormat($this->platform->getDateTimeFormatString(), $row['timestamp']),
@@ -565,7 +571,7 @@ class AuditReader
         $auditedEntities = $this->metadataFactory->getAllClassNames();
 
         $changedEntities = array();
-        foreach ($auditedEntities AS $className) {
+        foreach ($auditedEntities as $className) {
             /** @var ClassMetadataInfo|ClassMetadata $class */
             $class = $this->em->getClassMetadata($className);
 
@@ -583,17 +589,18 @@ class AuditReader
 
             foreach ($class->fieldNames as $columnName => $field) {
                 $type = Type::getType($class->fieldMappings[$field]['type']);
-                $tableAlias = $class->isInheritanceTypeJoined() && $class->isInheritedField($field)	&& ! $class->isIdentifier($field)
+                $tableAlias = $class->isInheritanceTypeJoined() && $class->isInheritedField($field)    && ! $class->isIdentifier($field)
                     ? 're' // root entity
                     : 'e';
                 $columnList .= ', ' . $type->convertToPHPValueSQL(
-                        $tableAlias . '.' . $this->quoteStrategy->getColumnName($field, $class, $this->platform), $this->platform
+                        $tableAlias . '.' . $this->quoteStrategy->getColumnName($field, $class, $this->platform),
+                    $this->platform
                     ) . ' AS ' . $this->platform->quoteSingleIdentifier($field);
                 $columnMap[$field] = $this->platform->getSQLResultCasing($columnName);
             }
 
-            foreach ($class->associationMappings AS $assoc) {
-                if ( ($assoc['type'] & ClassMetadata::TO_ONE) > 0 && $assoc['isOwningSide']) {
+            foreach ($class->associationMappings as $assoc) {
+                if (($assoc['type'] & ClassMetadata::TO_ONE) > 0 && $assoc['isOwningSide']) {
                     foreach ($assoc['targetToSourceKeyColumns'] as $sourceCol) {
                         $columnList .= ', ' . $sourceCol;
                         $columnMap[$sourceCol] = $this->platform->getSQLResultCasing($sourceCol);
@@ -623,10 +630,10 @@ class AuditReader
             $query = "SELECT " . $columnList . " FROM " . $tableName . " e " . $joinSql . " WHERE " . $whereSQL;
             $revisionsData = $this->em->getConnection()->executeQuery($query, $params);
 
-            foreach ($revisionsData AS $row) {
+            foreach ($revisionsData as $row) {
                 $id   = array();
 
-                foreach ($class->identifier AS $idField) {
+                foreach ($class->identifier as $idField) {
                     $id[$idField] = $row[$idField];
                 }
 
@@ -688,13 +695,13 @@ class AuditReader
         }
 
         $whereSQL = "";
-        foreach ($class->identifier AS $idField) {
+        foreach ($class->identifier as $idField) {
             if (isset($class->fieldMappings[$idField])) {
                 if ($whereSQL) {
                     $whereSQL .= " AND ";
                 }
                 $whereSQL .= "e." . $class->fieldMappings[$idField]['columnName'] . " = ?";
-            } else if (isset($class->associationMappings[$idField])) {
+            } elseif (isset($class->associationMappings[$idField])) {
                 if ($whereSQL) {
                     $whereSQL .= " AND ";
                 }
@@ -707,7 +714,7 @@ class AuditReader
         $revisionsData = $this->em->getConnection()->fetchAll($query, array_values($id));
 
         $revisions = array();
-        foreach ($revisionsData AS $row) {
+        foreach ($revisionsData as $row) {
             $revisions[] = new Revision(
                 $row['id'],
                 \DateTime::createFromFormat($this->platform->getDateTimeFormatString(), $row['timestamp']),
@@ -741,13 +748,13 @@ class AuditReader
         }
 
         $whereSQL = "";
-        foreach ($class->identifier AS $idField) {
+        foreach ($class->identifier as $idField) {
             if (isset($class->fieldMappings[$idField])) {
                 if ($whereSQL) {
                     $whereSQL .= " AND ";
                 }
                 $whereSQL .= "e." . $class->fieldMappings[$idField]['columnName'] . " = ?";
-            } else if (isset($class->associationMappings[$idField])) {
+            } elseif (isset($class->associationMappings[$idField])) {
                 if ($whereSQL) {
                     $whereSQL .= " AND ";
                 }
@@ -804,7 +811,7 @@ class AuditReader
         $fields = $metadata->getFieldNames();
 
         $return = array();
-        foreach ($fields AS $fieldName) {
+        foreach ($fields as $fieldName) {
             $return[$fieldName] = $metadata->getFieldValue($entity, $fieldName);
         }
 
@@ -826,10 +833,10 @@ class AuditReader
         }
 
         $whereId = array();
-        foreach ($class->identifier AS $idField) {
+        foreach ($class->identifier as $idField) {
             if (isset($class->fieldMappings[$idField])) {
                 $columnName = $class->fieldMappings[$idField]['columnName'];
-            } else if (isset($class->associationMappings[$idField])) {
+            } elseif (isset($class->associationMappings[$idField])) {
                 $columnName = $class->associationMappings[$idField]['joinColumns'][0];
             } else {
                 continue;
@@ -851,8 +858,8 @@ class AuditReader
             $columnMap[$field] = $this->platform->getSQLResultCasing($columnName);
         }
 
-        foreach ($class->associationMappings AS $assoc) {
-            if ( ($assoc['type'] & ClassMetadata::TO_ONE) == 0 || !$assoc['isOwningSide']) {
+        foreach ($class->associationMappings as $assoc) {
+            if (($assoc['type'] & ClassMetadata::TO_ONE) == 0 || !$assoc['isOwningSide']) {
                 continue;
             }
 

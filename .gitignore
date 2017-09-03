@@ -6,3 +6,4 @@ tests/SimpleThings/Tests/EntityAudit/Proxies
 .php_cs.cache
 composer.phar
 .idea
+phpunit.phar

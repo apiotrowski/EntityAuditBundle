@@ -1,10 +1,10 @@
 <?php
 /*
+ *
  * (c) 2011 SimpleThings GmbH
  *
  * @package SimpleThings\EntityAudit
  * @author Benjamin Eberlei <eberlei@simplethings.de>
- * @author Andrew Tch <andrew.tchircoff@gmail.com>
  * @link http://www.simplethings.de
  *
  * This library is free software; you can redistribute it and/or
@@ -20,6 +20,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ *
  */
 
 namespace SimpleThings\EntityAudit\Exception;
