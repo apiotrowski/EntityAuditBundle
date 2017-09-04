@@ -37,6 +37,7 @@ use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\Persisters\Entity\BasicEntityPersister;
 use Doctrine\ORM\Persisters\Entity\EntityPersister;
 use SimpleThings\EntityAudit\AuditManager;
+use Symfony\Component\PropertyAccess\PropertyAccess;
 
 class LogRevisionsListener implements EventSubscriber
 {
@@ -91,8 +92,6 @@ class LogRevisionsListener implements EventSubscriber
      */
     private $extraUpdates = array();
 
-    private $extraUpdatesCollection = array();
-
     public function __construct(AuditManager $auditManager)
     {
         $this->config = $auditManager->getConfiguration();
@@ -129,6 +128,13 @@ class LogRevisionsListener implements EventSubscriber
             }
 
             foreach ($updateData[$meta->table['name']] as $column => $value) {
+
+                if ($column === ClassMetadata::MANY_TO_MANY) {
+                    $this->saveRevisionCollectionData($value);
+
+                    continue;
+                }
+
                 $field = $meta->getFieldName($column);
                 $fieldName = $meta->getFieldForColumn($column);
                 $placeholder = '?';
@@ -205,7 +211,10 @@ class LogRevisionsListener implements EventSubscriber
             }
         }
 
+
         /** @var PersistentCollection $persistentCollection */
+
+        /**
         foreach ($uow->getScheduledCollectionUpdates() as $persistentCollection) {
             if (!$this->metadataFactory->isAudited(get_class($persistentCollection->getOwner()))) {
                 continue;
@@ -239,7 +248,7 @@ class LogRevisionsListener implements EventSubscriber
                     'UPD'
                 ));
             }
-        }
+        }*/
     }
 
     public function postPersist(LifecycleEventArgs $eventArgs)
@@ -326,6 +335,27 @@ class LogRevisionsListener implements EventSubscriber
             }
 
             $this->extraUpdates[spl_object_hash($entity)] = $entity;
+        }
+
+        /** @var PersistentCollection $persistentCollection */
+        foreach ($this->uow->getScheduledCollectionUpdates() as $persistentCollection) {
+            $entityOwner = $persistentCollection->getOwner();
+
+            if (! $this->metadataFactory->isAudited(get_class($entityOwner))) {
+                continue;
+            }
+
+            $this->extraUpdates[spl_object_hash($entityOwner)] = $entityOwner;
+        }
+
+        foreach ($this->uow->getScheduledCollectionDeletions() as $persistentCollection) {
+            $entityOwner = $persistentCollection->getOwner();
+
+            if (! $this->metadataFactory->isAudited(get_class($entityOwner))) {
+                continue;
+            }
+
+            $this->extraUpdates[spl_object_hash($entityOwner)] = $entityOwner;
         }
     }
 
@@ -563,6 +593,30 @@ class LogRevisionsListener implements EventSubscriber
             $versionField = $classMetadata->versionField;
         }
 
+        foreach ($classMetadata->associationMappings as $column => $data) {
+            if ($data['type'] !== ClassMetadata::MANY_TO_MANY) {
+                continue;
+            }
+
+            $accessor = PropertyAccess::createPropertyAccessor();
+            $persistentCollection = $accessor->getValue($entity, $data['fieldName']);
+
+            $joinedTable = $data['joinTable']['name'];
+            $relatedIds = array_map(function($relatedObject) {
+                return $relatedObject->getId();
+            }, $persistentCollection->getValues());
+            $ownerIdField = $data['joinTable']['joinColumns'][0]['name'];
+            $relatedIdField = $data['joinTable']['inverseJoinColumns'][0]['name'];
+
+            $result[$persister->getOwningTable($column)][ClassMetadata::MANY_TO_MANY][] = [
+                'joinTable' => $joinedTable,
+                'ownerIdField' => $ownerIdField,
+                'ownerId' => $entity->getId(),
+                'relatedIdField' => $relatedIdField,
+                'relatedIds' => $relatedIds,
+            ];
+        }
+
         foreach ($uow->getEntityChangeSet($entity) as $field => $change) {
             if (isset($versionField) && $versionField == $field) {
                 continue;
@@ -618,5 +672,32 @@ class LogRevisionsListener implements EventSubscriber
         }
 
         return $result;
+    }
+
+    private function saveRevisionCollectionData($value)
+    {
+        foreach ($value as $relationInfo) {
+            $revisionTableName = $this->config->getTablePrefix() . $relationInfo['joinTable'] . $this->config->getTableSuffix();
+            $relatedIdField = $relationInfo['relatedIdField'];
+            $ownerIdField = $relationInfo['ownerIdField'];
+            $ownerId = $relationInfo['ownerId'];
+            $relatedIds = $relationInfo['relatedIds'];
+
+            $sql = sprintf(
+                'INSERT INTO %s (%s, %s, rev, revtype) VALUES (?, ?, ?, ?)',
+                $revisionTableName,
+                $relatedIdField,
+                $ownerIdField
+            );
+
+            foreach ($relatedIds as $relatedId) {
+                $this->em->getConnection()->executeQuery($sql, array(
+                    $relatedId,
+                    $ownerId,
+                    $this->getRevisionId(),
+                    'UPD'
+                ));
+            }
+        }
     }
 }
