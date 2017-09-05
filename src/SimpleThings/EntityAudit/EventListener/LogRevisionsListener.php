@@ -41,6 +41,13 @@ use Symfony\Component\PropertyAccess\PropertyAccess;
 
 class LogRevisionsListener implements EventSubscriber
 {
+    const INSERT_DIFF = 'INSERT_DIFF';
+    const DELETE_DIFF = 'DELETE_DIFF';
+
+    const INSERT_OPERATION_TYPE = 'INS';
+    const UPDATE_OPERATION_TYPE = 'UPD';
+    const DELETE_OPERATION_TYPE = 'DEL';
+
     /**
      * @var \SimpleThings\EntityAudit\AuditConfiguration
      */
@@ -92,6 +99,11 @@ class LogRevisionsListener implements EventSubscriber
      */
     private $extraUpdates = array();
 
+    /**
+     * @var array
+     */
+    private $extraCollectionDiffData = array();
+
     public function __construct(AuditManager $auditManager)
     {
         $this->config = $auditManager->getConfiguration();
@@ -118,6 +130,7 @@ class LogRevisionsListener implements EventSubscriber
 
         foreach ($this->extraUpdates as $entity) {
             $className = get_class($entity);
+            $splObjectHash = spl_object_hash($entity);
             $meta = $em->getClassMetadata($className);
 
             $persister = $uow->getEntityPersister($className);
@@ -128,9 +141,8 @@ class LogRevisionsListener implements EventSubscriber
             }
 
             foreach ($updateData[$meta->table['name']] as $column => $value) {
-
                 if ($column === ClassMetadata::MANY_TO_MANY) {
-                    $this->saveRevisionCollectionData($value);
+                    $this->saveRevisionCollectionData($value, isset($this->extraCollectionDiffData[$splObjectHash]) ? isset($this->extraCollectionDiffData[$splObjectHash]) : []);
 
                     continue;
                 }
@@ -179,7 +191,7 @@ class LogRevisionsListener implements EventSubscriber
                             sprintf('Could not resolve database type for column "%s" during extra updates', $column)
                         );
                     }
-                    
+
                     $types[] = $type;
                 }
 
@@ -210,45 +222,6 @@ class LogRevisionsListener implements EventSubscriber
                 $this->em->getConnection()->executeQuery($sql, $params, $types);
             }
         }
-
-
-        /** @var PersistentCollection $persistentCollection */
-
-        /**
-        foreach ($uow->getScheduledCollectionUpdates() as $persistentCollection) {
-            if (!$this->metadataFactory->isAudited(get_class($persistentCollection->getOwner()))) {
-                continue;
-            }
-
-            if ($persistentCollection->getMapping()['type'] !== ClassMetadata::MANY_TO_MANY) {
-                continue;
-            }
-
-            $mapping = $persistentCollection->getMapping();
-
-            $revisionTableName = $this->config->getTablePrefix() . $mapping['joinTable']['name'] . $this->config->getTableSuffix();
-            $ownerId = $persistentCollection->getOwner()->getId();
-            $relationToIds = array_map(function ($entity) {
-                return $entity->getId();
-            }, $persistentCollection->getValues());
-            $joinTableColumns[] = $mapping['joinTable']['joinColumns'][0]['name'];
-            $joinTableColumns[] = $mapping['joinTable']['inverseJoinColumns'][0]['name'];
-
-            $sql = sprintf(
-                'INSERT INTO %s (%s, rev, revtype) VALUES (?, ?, ?, ?)',
-                $revisionTableName,
-                implode(', ', $joinTableColumns)
-            );
-
-            foreach ($relationToIds as $relationId) {
-                $this->em->getConnection()->executeQuery($sql, array(
-                    $ownerId,
-                    $relationId,
-                    $this->getRevisionId(),
-                    'UPD'
-                ));
-            }
-        }*/
     }
 
     public function postPersist(LifecycleEventArgs $eventArgs)
@@ -261,7 +234,7 @@ class LogRevisionsListener implements EventSubscriber
             return;
         }
 
-        $this->saveRevisionEntityData($class, $this->getOriginalEntityData($entity), 'INS');
+        $this->saveRevisionEntityData($class, $this->getOriginalEntityData($entity), self::INSERT_OPERATION_TYPE);
     }
 
     public function postUpdate(LifecycleEventArgs $eventArgs)
@@ -288,7 +261,7 @@ class LogRevisionsListener implements EventSubscriber
         }
 
         $entityData = array_merge($this->getOriginalEntityData($entity), $this->uow->getEntityIdentifier($entity));
-        $this->saveRevisionEntityData($class, $entityData, 'UPD');
+        $this->saveRevisionEntityData($class, $entityData, self::UPDATE_OPERATION_TYPE);
     }
 
     public function onFlush(OnFlushEventArgs $eventArgs)
@@ -318,7 +291,7 @@ class LogRevisionsListener implements EventSubscriber
             }
 
             $entityData = array_merge($this->getOriginalEntityData($entity), $this->uow->getEntityIdentifier($entity));
-            $this->saveRevisionEntityData($class, $entityData, 'DEL');
+            $this->saveRevisionEntityData($class, $entityData, self::DELETE_OPERATION_TYPE);
         }
 
         foreach ($this->uow->getScheduledEntityInsertions() as $entity) {
@@ -346,16 +319,10 @@ class LogRevisionsListener implements EventSubscriber
             }
 
             $this->extraUpdates[spl_object_hash($entityOwner)] = $entityOwner;
-        }
-
-        foreach ($this->uow->getScheduledCollectionDeletions() as $persistentCollection) {
-            $entityOwner = $persistentCollection->getOwner();
-
-            if (! $this->metadataFactory->isAudited(get_class($entityOwner))) {
-                continue;
-            }
-
-            $this->extraUpdates[spl_object_hash($entityOwner)] = $entityOwner;
+            $this->extraCollectionDiffData[spl_object_hash($entityOwner)][$persistentCollection->getMapping()['fieldName']] = [
+                self::INSERT_DIFF => $persistentCollection->getInsertDiff(),
+                self::DELETE_DIFF => $persistentCollection->getDeleteDiff(),
+            ];
         }
     }
 
@@ -599,7 +566,9 @@ class LogRevisionsListener implements EventSubscriber
             }
 
             $accessor = PropertyAccess::createPropertyAccessor();
+            /** @var PersistentCollection $persistentCollection */
             $persistentCollection = $accessor->getValue($entity, $data['fieldName']);
+
 
             $joinedTable = $data['joinTable']['name'];
             $relatedIds = array_map(function($relatedObject) {
@@ -610,6 +579,7 @@ class LogRevisionsListener implements EventSubscriber
 
             $result[$persister->getOwningTable($column)][ClassMetadata::MANY_TO_MANY][] = [
                 'joinTable' => $joinedTable,
+                'ownerFieldName' => $data['fieldName'],
                 'ownerIdField' => $ownerIdField,
                 'ownerId' => $entity->getId(),
                 'relatedIdField' => $relatedIdField,
@@ -674,11 +644,16 @@ class LogRevisionsListener implements EventSubscriber
         return $result;
     }
 
-    private function saveRevisionCollectionData($value)
+    /**
+     * @param array $value
+     * @param array $diffData
+     */
+    private function saveRevisionCollectionData($value, array $diffData)
     {
         foreach ($value as $relationInfo) {
             $revisionTableName = $this->config->getTablePrefix() . $relationInfo['joinTable'] . $this->config->getTableSuffix();
             $relatedIdField = $relationInfo['relatedIdField'];
+            $ownerFieldName = $relationInfo['ownerFieldName'];
             $ownerIdField = $relationInfo['ownerIdField'];
             $ownerId = $relationInfo['ownerId'];
             $relatedIds = $relationInfo['relatedIds'];
@@ -691,13 +666,52 @@ class LogRevisionsListener implements EventSubscriber
             );
 
             foreach ($relatedIds as $relatedId) {
+                $operationType = $this->resolveCollectionOperationType($diffData, $ownerFieldName, $relatedId);
+
                 $this->em->getConnection()->executeQuery($sql, array(
                     $relatedId,
                     $ownerId,
                     $this->getRevisionId(),
-                    'UPD'
+                    $operationType
                 ));
             }
+
+            if (isset($diffData[$ownerFieldName][self::DELETE_DIFF])) {
+                $deletedRelatedIds = array_map(function ($object) {
+                    return $object->getId();
+                }, $diffData[$ownerFieldName][self::DELETE_DIFF]);
+
+                foreach ($deletedRelatedIds as $deletedRelatedId) {
+                    $this->em->getConnection()->executeQuery($sql, array(
+                        $deletedRelatedId,
+                        $ownerId,
+                        $this->getRevisionId(),
+                        self::DELETE_OPERATION_TYPE
+                    ));
+                }
+            }
         }
+    }
+
+    /**
+     * @param array $diffData
+     * @param string $ownerFieldName
+     * @param int $relatedId
+     *
+     * @return string
+     */
+    private function resolveCollectionOperationType($diffData, $ownerFieldName, $relatedId)
+    {
+        if (isset($diffData[$ownerFieldName][self::INSERT_DIFF])) {
+            $insertDiff = $diffData[$ownerFieldName][self::INSERT_DIFF];
+
+            $insertRelatedIds = array_map(function ($object) {
+                return $object->getId();
+            }, $insertDiff);
+
+            return array_search($relatedId, $insertRelatedIds) === false ? self::UPDATE_OPERATION_TYPE : self::INSERT_OPERATION_TYPE;
+        }
+
+        return self::UPDATE_OPERATION_TYPE;
     }
 }
