@@ -280,8 +280,8 @@ class AuditReader
 
             foreach ($assoc['joinColumnFieldNames'] as $sourceCol) {
                 $tableAlias = $class->isInheritanceTypeJoined() &&
-                    $class->isInheritedAssociation($assoc['fieldName']) &&
-                    !$class->isIdentifier($assoc['fieldName'])
+                $class->isInheritedAssociation($assoc['fieldName']) &&
+                !$class->isIdentifier($assoc['fieldName'])
                     ? 're' // root entity
                     : 'e';
                 $columnList[] = $tableAlias.'.'.$sourceCol;
@@ -514,10 +514,54 @@ class AuditReader
                         $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection());
                     }
                 }
-            } else {
-                // Inject collection
-                $reflField = $class->reflFields[$field];
-                $reflField->setValue($entity, new ArrayCollection);
+            } else { // MANY TO MANY
+                $collection = new PersistentCollection($this->em, $targetClass, new ArrayCollection());
+
+                $this->getEntityPersister($assoc['targetEntity'])
+                    ->loadManyToManyCollection($assoc, $entity, $collection);
+
+                $class->reflFields[$assoc['fieldName']]->setValue($entity, $collection);
+
+//                if ($this->metadataFactory->isAudited($assoc['targetEntity'])) {
+//                    if ($this->loadAuditedCollections) {
+//                        $foreignKeys = array();
+//                        if ($assoc['isOwningSide']) {
+//                            foreach ($assoc['relationToSourceKeyColumns'] as $foreign => $local) {
+//                                $field = $class->getFieldForColumn($foreign);
+//                                $foreignKeys[$local] = $class->reflFields[$field]->getValue($entity);
+//                            }
+//                        } else {
+//                            /** @var ClassMetadataInfo|ClassMetadata $otherEntityMeta */
+//                            $otherEntityAssoc = $this->em->getClassMetadata($assoc['targetEntity'])->associationMappings[$assoc['mappedBy']];
+//
+//                            foreach ($otherEntityAssoc['relationToSourceKeyColumns'] as $local => $foreign) {
+//                                $field = $class->getFieldForColumn($foreign);
+//                                $foreignKeys[$local] = $class->reflFields[$field]->getValue($entity);
+//                            }
+//                        }
+//
+//                        $collection = new AuditedCollection($this, $targetClass->name, $targetClass, $assoc, $foreignKeys, $revision);
+//
+//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, $collection);
+//                    } else {
+//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection());
+//                    }
+//                } else {
+//                    if ($this->loadNativeCollections) {
+//                        $collection = new PersistentCollection($this->em, $targetClass, new ArrayCollection());
+//
+//                        $this->getEntityPersister($assoc['targetEntity'])
+//                            ->loadManyToManyCollection($assoc, $entity, $collection);
+//
+//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, $collection);
+//                    } else {
+//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection());
+//                    }
+//                }
+
+//                // Inject collection
+//                $reflField = $class->reflFields[$field];
+//                $reflField->setValue($entity, $collection);
             }
         }
 
@@ -594,7 +638,7 @@ class AuditReader
                     : 'e';
                 $columnList .= ', ' . $type->convertToPHPValueSQL(
                         $tableAlias . '.' . $this->quoteStrategy->getColumnName($field, $class, $this->platform),
-                    $this->platform
+                        $this->platform
                     ) . ' AS ' . $this->platform->quoteSingleIdentifier($field);
                 $columnMap[$field] = $this->platform->getSQLResultCasing($columnName);
             }
@@ -710,7 +754,7 @@ class AuditReader
         }
 
         $query = "SELECT r.* FROM " . $this->config->getRevisionTableName() . " r " .
-                 "INNER JOIN " . $tableName . " e ON r.id = e." . $this->config->getRevisionFieldName() . " WHERE " . $whereSQL . " ORDER BY r.id DESC";
+            "INNER JOIN " . $tableName . " e ON r.id = e." . $this->config->getRevisionFieldName() . " WHERE " . $whereSQL . " ORDER BY r.id DESC";
         $revisionsData = $this->em->getConnection()->fetchAll($query, array_values($id));
 
         $revisions = array();
@@ -763,7 +807,7 @@ class AuditReader
         }
 
         $query = "SELECT e.".$this->config->getRevisionFieldName()." FROM " . $tableName . " e " .
-                        " WHERE " . $whereSQL . " ORDER BY e.".$this->config->getRevisionFieldName()." DESC";
+            " WHERE " . $whereSQL . " ORDER BY e.".$this->config->getRevisionFieldName()." DESC";
         $revision = $this->em->getConnection()->fetchColumn($query, array_values($id));
 
         return $revision;
