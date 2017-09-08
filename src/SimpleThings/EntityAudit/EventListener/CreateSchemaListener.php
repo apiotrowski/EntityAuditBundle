@@ -110,17 +110,23 @@ class CreateSchemaListener implements EventSubscriber
             $joinTable = $mapping['joinTable'];
             $tableName = $joinTable['name'];
 
-            $manyToManyRevisionTable = $schema->createTable(
-                $this->config->getTablePrefix() . $tableName . $this->config->getTableSuffix()
-            );
+            if (false === array_key_exists('joinColumns', $joinTable)) {
+                continue;
+            }
 
-            $manyToManyRevisionTable->addColumn($joinTable['joinColumns'][0]['name'], 'integer');
-            $manyToManyRevisionTable->addColumn($joinTable['inverseJoinColumns'][0]['name'], 'integer');
+            if ($mapping['isOwningSide']) {
+                $manyToManyRevisionTable = $schema->createTable(
+                    $this->config->getTablePrefix() . $tableName . $this->config->getTableSuffix()
+                );
 
-            $manyToManyRevisionTable->addColumn($this->config->getRevisionFieldName(), $this->config->getRevisionIdFieldType());
-            $manyToManyRevisionTable->addColumn($this->config->getRevisionTypeFieldName(), 'string', array('length' => 4));
-            $revIndexName = $this->config->getRevisionFieldName().'_'.md5($tableName).'_idx';
-            $manyToManyRevisionTable->addIndex(array($this->config->getRevisionFieldName()), $revIndexName);
+                $manyToManyRevisionTable->addColumn($joinTable['joinColumns'][0]['name'], 'integer');
+                $manyToManyRevisionTable->addColumn($joinTable['inverseJoinColumns'][0]['name'], 'integer');
+
+                $manyToManyRevisionTable->addColumn($this->config->getRevisionFieldName(), $this->config->getRevisionIdFieldType());
+                $manyToManyRevisionTable->addColumn($this->config->getRevisionTypeFieldName(), 'string', array('length' => 4));
+                $revIndexName = $this->config->getRevisionFieldName() . '_' . md5($tableName) . '_idx';
+                $manyToManyRevisionTable->addIndex(array($this->config->getRevisionFieldName()), $revIndexName);
+            }
         }
     }
 

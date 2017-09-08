@@ -565,10 +565,13 @@ class LogRevisionsListener implements EventSubscriber
                 continue;
             }
 
+            if (false === $data['isOwningSide']) {
+                continue;
+            }
+
             $accessor = PropertyAccess::createPropertyAccessor();
             /** @var PersistentCollection $persistentCollection */
             $persistentCollection = $accessor->getValue($entity, $data['fieldName']);
-
 
             $joinedTable = $data['joinTable']['name'];
             $relatedIds = array_map(function($relatedObject) {
