@@ -947,4 +947,72 @@ class AuditReader
 
         return $result;
     }
+
+    /**
+     * @param string $className
+     * @param string $groupField
+     * @param mixed $value
+     *
+     * @return array
+     *
+     * @throws NotAuditedException
+     * @throws \InvalidArgumentException
+     */
+    public function getGroupEntityHistoryByField($className, $groupField, $value)
+    {
+        if (!$this->metadataFactory->isAudited($className)) {
+            throw new NotAuditedException($className);
+        }
+
+        /** @var ClassMetadataInfo|ClassMetadata $class */
+        $class = $this->em->getClassMetadata($className);
+        $tableName = $this->config->getTableName($class);
+
+        foreach ($class->associationMappings as $field => $associationMapping) {
+            if ($groupField === $field) {
+                $columnName = $associationMapping['joinColumns'][0]['name'];
+                $whereSQL = "{$columnName} = ?";
+                break;
+            }
+        }
+
+        if (! isset($whereSQL)) {
+            throw new \InvalidArgumentException(sprintf('Not found %s field in %s during getting grouped history', $groupField, $className));
+        }
+
+        $columnList = array($this->config->getRevisionFieldName());
+        $columnMap  = array();
+
+        foreach ($class->fieldNames as $columnName => $field) {
+            $type = Type::getType($class->fieldMappings[$field]['type']);
+            $columnList[] = $type->convertToPHPValueSQL(
+                    $this->quoteStrategy->getColumnName($field, $class, $this->platform),
+                    $this->platform
+                ) . ' AS ' . $this->platform->quoteSingleIdentifier($field);
+            $columnMap[$field] = $this->platform->getSQLResultCasing($columnName);
+        }
+
+        foreach ($class->associationMappings as $assoc) {
+            if (($assoc['type'] & ClassMetadata::TO_ONE) == 0 || !$assoc['isOwningSide']) {
+                continue;
+            }
+
+            foreach ($assoc['targetToSourceKeyColumns'] as $sourceCol) {
+                $columnList[] = $sourceCol;
+                $columnMap[$sourceCol] = $this->platform->getSQLResultCasing($sourceCol);
+            }
+        }
+
+        $query = "SELECT " . implode(', ', $columnList) . " FROM " . $tableName . " e WHERE " . $whereSQL . " ORDER BY e.".$this->config->getRevisionFieldName()." DESC";
+        $stmt = $this->em->getConnection()->executeQuery($query, [$value]);
+
+        $result = array();
+        while ($row = $stmt->fetch(Query::HYDRATE_ARRAY)) {
+            $rev = $row[$this->config->getRevisionFieldName()];
+            unset($row[$this->config->getRevisionFieldName()]);
+            $result[] = $this->createEntity($class->name, $columnMap, $row, $rev);
+        }
+
+        return $result;
+    }
 }
