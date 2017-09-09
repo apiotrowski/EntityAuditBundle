@@ -142,7 +142,7 @@ class LogRevisionsListener implements EventSubscriber
 
             foreach ($updateData[$meta->table['name']] as $column => $value) {
                 if ($column === ClassMetadata::MANY_TO_MANY) {
-                    $this->saveRevisionCollectionData($value, isset($this->extraCollectionDiffData[$splObjectHash]) ? isset($this->extraCollectionDiffData[$splObjectHash]) : []);
+                    $this->saveRevisionCollectionData($value, isset($this->extraCollectionDiffData[$splObjectHash]) ? $this->extraCollectionDiffData[$splObjectHash] : []);
 
                     continue;
                 }
