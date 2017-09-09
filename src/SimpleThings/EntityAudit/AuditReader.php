@@ -43,6 +43,7 @@ use SimpleThings\EntityAudit\Exception\NoRevisionFoundException;
 use SimpleThings\EntityAudit\Exception\NotAuditedException;
 use SimpleThings\EntityAudit\Metadata\MetadataFactory;
 use SimpleThings\EntityAudit\Utils\ArrayDiff;
+use SimpleThings\EntityAudit\Utils\AuditedEntity;
 
 class AuditReader
 {
@@ -882,7 +883,7 @@ class AuditReader
         return $return;
     }
 
-    public function getEntityHistory($className, $id)
+    public function getEntityHistory($className, $id, $appendRevisionDate = false)
     {
         if (!$this->metadataFactory->isAudited($className)) {
             throw new NotAuditedException($className);
@@ -906,7 +907,7 @@ class AuditReader
                 continue;
             }
 
-            $whereId[] = "{$columnName} = ?";
+            $whereId[] = "e.{$columnName} = ?";
         }
 
         $whereSQL  = implode(' AND ', $whereId);
@@ -935,30 +936,37 @@ class AuditReader
 
         $values = array_values($id);
 
-        $query = "SELECT " . implode(', ', $columnList) . " FROM " . $tableName . " e WHERE " . $whereSQL . " ORDER BY e.".$this->config->getRevisionFieldName()." DESC";
+        if (true === $appendRevisionDate) {
+            $columnList = array_map(function ($columnName) {
+                return 'e.' . $columnName;
+            }, $columnList);
+
+            $query = "SELECT " . implode(', ', $columnList) . ", r.timestamp" .
+                " FROM " . $tableName . " AS e" .
+                " JOIN " . $this->getConfiguration()->getRevisionTableName() . " AS r ON e." . $this->getConfiguration()->getRevisionFieldName() . "= r.id" .
+                " WHERE " . $whereSQL .
+                " ORDER BY e." . $this->config->getRevisionFieldName() . " DESC";
+        } else {
+            $query = "SELECT " . implode(', ', $columnList) . " FROM " . $tableName . " e WHERE " . $whereSQL . " ORDER BY e." . $this->config->getRevisionFieldName() . " DESC";
+        }
         $stmt = $this->em->getConnection()->executeQuery($query, $values);
 
         $result = array();
         while ($row = $stmt->fetch(Query::HYDRATE_ARRAY)) {
             $rev = $row[$this->config->getRevisionFieldName()];
             unset($row[$this->config->getRevisionFieldName()]);
-            $result[] = $this->createEntity($class->name, $columnMap, $row, $rev);
+
+            $entity = $this->createEntity($class->name, $columnMap, $row, $rev);
+            if ($appendRevisionDate && $entity instanceof AuditedEntity) {
+                $entity->setRevisionDate($row['timestamp']);
+            }
+            $result[] = $entity;
         }
 
         return $result;
     }
 
-    /**
-     * @param string $className
-     * @param string $groupField
-     * @param mixed $value
-     *
-     * @return array
-     *
-     * @throws NotAuditedException
-     * @throws \InvalidArgumentException
-     */
-    public function getGroupEntityHistoryByField($className, $groupField, $value)
+    public function getGroupEntityHistoryByField($className, $groupField, $value, $appendRevisionDate = false)
     {
         if (!$this->metadataFactory->isAudited($className)) {
             throw new NotAuditedException($className);
@@ -1003,14 +1011,31 @@ class AuditReader
             }
         }
 
-        $query = "SELECT " . implode(', ', $columnList) . " FROM " . $tableName . " e WHERE " . $whereSQL . " ORDER BY e.".$this->config->getRevisionFieldName()." DESC";
+        if (true === $appendRevisionDate) {
+            $columnList = array_map(function ($columnName) {
+                return 'e.' . $columnName;
+            }, $columnList);
+
+            $query = "SELECT " . implode(', ', $columnList) . ", r.timestamp" .
+                " FROM " . $tableName . " AS e" .
+                " JOIN " . $this->getConfiguration()->getRevisionTableName() . " AS r ON e." . $this->getConfiguration()->getRevisionFieldName() . "= r.id" .
+                " WHERE " . $whereSQL .
+                " ORDER BY e." . $this->config->getRevisionFieldName() . " DESC";
+        } else {
+            $query = "SELECT " . implode(', ', $columnList) . " FROM " . $tableName . " e WHERE " . $whereSQL . " ORDER BY e." . $this->config->getRevisionFieldName() . " DESC";
+        }
         $stmt = $this->em->getConnection()->executeQuery($query, [$value]);
 
         $result = array();
         while ($row = $stmt->fetch(Query::HYDRATE_ARRAY)) {
             $rev = $row[$this->config->getRevisionFieldName()];
             unset($row[$this->config->getRevisionFieldName()]);
-            $result[] = $this->createEntity($class->name, $columnMap, $row, $rev);
+
+            $entity = $this->createEntity($class->name, $columnMap, $row, $rev);
+            if ($appendRevisionDate && $entity instanceof AuditedEntity) {
+                $entity->setRevisionDate($row['timestamp']);
+            }
+            $result[] = $entity;
         }
 
         return $result;
