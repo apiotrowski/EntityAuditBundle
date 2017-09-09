@@ -31,10 +31,12 @@ use Doctrine\DBAL\Types\Type;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\ClassMetadataInfo;
+use Doctrine\ORM\Mapping\MappingException;
 use Doctrine\ORM\Mapping\QuoteStrategy;
 use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\Query;
 use SimpleThings\EntityAudit\Collection\AuditedCollection;
+use SimpleThings\EntityAudit\Collection\AuditedManyToManyCollection;
 use SimpleThings\EntityAudit\Exception\DeletedException;
 use SimpleThings\EntityAudit\Exception\InvalidRevisionException;
 use SimpleThings\EntityAudit\Exception\NoRevisionFoundException;
@@ -515,57 +517,75 @@ class AuditReader
                     }
                 }
             } else { // MANY TO MANY
-                $collection = new PersistentCollection($this->em, $targetClass, new ArrayCollection());
+                if ($this->metadataFactory->isAudited($assoc['targetEntity'])) {
+                    if ($this->loadAuditedCollections) {
+                        $relationInfo = null;
+                        if (true === $assoc['isOwningSide']) {
+                            foreach ($assoc['relationToSourceKeyColumns'] as $foreign => $local) {
+                                $field = $this->getFieldForColumn($class, $foreign);
+                                $relationInfo = [
+                                    'field' => $field,
+                                    'join_table' => $this->config->getTablePrefix() . $assoc['joinTable']['name'] . $this->config->getTableSuffix(),
+                                    'target_class' => $assoc['targetEntity'],
+                                    'ownerIdField' => $foreign,
+                                    'ownerIdValue' => $entity->getId(),
+                                    'targetIdField' => $assoc['joinTableColumns'][1],
+                                ];
+                                break;
+                            }
+                        } else {
+                            // skip this because in not owning site don't have information about columns in join
+                            continue;
+                        }
 
-                $this->getEntityPersister($assoc['targetEntity'])
-                    ->loadManyToManyCollection($assoc, $entity, $collection);
+                        $collection = new AuditedManyToManyCollection(
+                            $this,
+                            $relationInfo['join_table'],
+                            $relationInfo['target_class'],
+                            $relationInfo['ownerIdField'],
+                            $relationInfo['ownerIdValue'],
+                            $relationInfo['targetIdField'],
+                            $revision
+                        );
 
-                $class->reflFields[$assoc['fieldName']]->setValue($entity, $collection);
+                        $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection($collection->getValues()));
+                    } else {
+                        $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection());
+                    }
+                } else {
+                    if ($this->loadNativeCollections) {
+                        $collection = new PersistentCollection($this->em, $targetClass, new ArrayCollection());
 
-//                if ($this->metadataFactory->isAudited($assoc['targetEntity'])) {
-//                    if ($this->loadAuditedCollections) {
-//                        $foreignKeys = array();
-//                        if ($assoc['isOwningSide']) {
-//                            foreach ($assoc['relationToSourceKeyColumns'] as $foreign => $local) {
-//                                $field = $class->getFieldForColumn($foreign);
-//                                $foreignKeys[$local] = $class->reflFields[$field]->getValue($entity);
-//                            }
-//                        } else {
-//                            /** @var ClassMetadataInfo|ClassMetadata $otherEntityMeta */
-//                            $otherEntityAssoc = $this->em->getClassMetadata($assoc['targetEntity'])->associationMappings[$assoc['mappedBy']];
-//
-//                            foreach ($otherEntityAssoc['relationToSourceKeyColumns'] as $local => $foreign) {
-//                                $field = $class->getFieldForColumn($foreign);
-//                                $foreignKeys[$local] = $class->reflFields[$field]->getValue($entity);
-//                            }
-//                        }
-//
-//                        $collection = new AuditedCollection($this, $targetClass->name, $targetClass, $assoc, $foreignKeys, $revision);
-//
-//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, $collection);
-//                    } else {
-//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection());
-//                    }
-//                } else {
-//                    if ($this->loadNativeCollections) {
-//                        $collection = new PersistentCollection($this->em, $targetClass, new ArrayCollection());
-//
-//                        $this->getEntityPersister($assoc['targetEntity'])
-//                            ->loadManyToManyCollection($assoc, $entity, $collection);
-//
-//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, $collection);
-//                    } else {
-//                        $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection());
-//                    }
-//                }
+                        $this->getEntityPersister($assoc['targetEntity'])
+                            ->loadManyToManyCollection($assoc, $entity, $collection);
 
-//                // Inject collection
-//                $reflField = $class->reflFields[$field];
-//                $reflField->setValue($entity, $collection);
+                        $class->reflFields[$assoc['fieldName']]->setValue($entity, $collection);
+                    } else {
+                        $class->reflFields[$assoc['fieldName']]->setValue($entity, new ArrayCollection());
+                    }
+                }
             }
         }
 
         return $entity;
+    }
+
+    public function getFieldForColumn($class, $columnName)
+    {
+        $fieldNames = $class->fieldNames;
+
+        if (isset($fieldNames[$columnName])) {
+            return $fieldNames[$columnName];
+        } else {
+            foreach ($class->associationMappings as $assocName => $mapping) {
+                if ($mapping['type'] === ClassMetadataInfo::MANY_TO_MANY &&
+                    $class->associationMappings[$assocName]['joinTableColumns'][0] == $columnName) {
+                    return $assocName;
+                }
+            }
+
+            throw MappingException::noFieldNameFoundForColumn($class->name, $columnName);
+        }
     }
 
     /**
